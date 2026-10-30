@@ -2093,6 +2093,119 @@
       font-weight: 600;
     }
 
+    .stamp-row {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      max-width: 100%;
+    }
+
+    .stamp-faces {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .stamp-face {
+      width: 16px;
+      height: 16px;
+      margin-left: -4px;
+      border: 1px solid var(--panel);
+      border-radius: 5px;
+      display: grid;
+      place-items: center;
+      color: #1a1209;
+      font-size: 8px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .stamp-face:first-child { margin-left: 0; }
+
+    .stamp-face.owner-avatar {
+      background: linear-gradient(135deg, #ffe1b0, #ff9f58);
+      color: #1a1209;
+    }
+
+    .stamp-more {
+      margin-left: 4px;
+      color: var(--muted);
+      font-family: var(--font-num);
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .reply-toggle {
+      padding: 0;
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      font-family: inherit;
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .message-item > .reply-toggle { margin: 8px 0 0 44px; }
+
+    .reply-box .reply-toggle {
+      margin: 0;
+      align-self: center;
+    }
+
+    .reply-toggle:hover,
+    .reply-toggle:focus-visible { color: var(--accent); }
+
+    .reply-box {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 0 44px;
+    }
+
+    .reply-box textarea {
+      flex: 1 1 180px;
+      min-height: 58px;
+      padding: 8px 10px;
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      color: var(--text);
+      background: var(--input);
+      font-family: inherit;
+      font-size: 12px;
+      line-height: 1.6;
+      resize: vertical;
+    }
+
+    .reply-box .community-btn { min-height: 32px; }
+
+    .message-replies {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin: 10px 0 0 44px;
+    }
+
+    .message-item.reply-item {
+      padding: 8px 10px 9px;
+      border: 0;
+      border-left: 2px solid rgba(255, 179, 92, .45);
+      border-radius: 0 10px 10px 0;
+      background: rgba(255, 255, 255, .02);
+    }
+
+    :root[data-theme="light"] .message-item.reply-item { background: rgba(26, 18, 9, .03); }
+
+    .reply-item .message-content,
+    .reply-item .message-stamps,
+    .reply-item .reply-target { margin-left: 0; }
+
+    .reply-target {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--accent);
+      font-size: 10px;
+    }
+
     .message-empty,
     .community-offline {
       padding: 22px 18px;
@@ -2350,7 +2463,10 @@
       .composer { padding: 13px 13px 12px; }
       .composer-note { display: none; }
       .message-content,
-      .message-stamps { margin-left: 0; }
+      .message-stamps,
+      .message-item > .reply-toggle,
+      .reply-box,
+      .message-replies { margin-left: 0; }
       .message-actions { opacity: 1; }
       .message-item { padding: 12px 12px; }
 
@@ -4443,6 +4559,52 @@
         };
       }
 
+      function parseReply(content) {
+        const match = String(content || '').match(/^\u2063\[\[r:(\d+)\]\]([\s\S]*)$/);
+        if (!match) return null;
+        const text = String(match[2] || '').trim();
+        if (!text) return null;
+        return { parentId: Number(match[1]), text };
+      }
+
+      function replyContent(parentId, text) {
+        return `\u2063[[r:${Number(parentId)}]]${String(text || '').trim()}`;
+      }
+
+      function nestReplies(messages) {
+        const roots = [];
+        const replies = [];
+        for (const message of messages) {
+          const parsed = parseReply(message.content);
+          if (!parsed) {
+            roots.push(message);
+            continue;
+          }
+          message.content = parsed.text;
+          message.replyTo = parsed.parentId;
+          message.isReply = true;
+          replies.push(message);
+        }
+        const byId = new Map(roots.map((message) => [message.id, message]));
+        for (const reply of replies) {
+          const parent = byId.get(reply.replyTo);
+          if (!parent) {
+            reply.isReply = false;
+            roots.push(reply);
+            continue;
+          }
+          reply.replyToName = parent.author ? parent.author.id : '';
+          reply.canPin = false;
+          reply.pinned = false;
+          if (!parent.replies) parent.replies = [];
+          parent.replies.push(reply);
+        }
+        for (const root of roots) {
+          if (root.replies) root.replies.sort((a, b) => a.createdAt - b.createdAt);
+        }
+        return roots;
+      }
+
       function reactionsByMessage(stamps) {
         const latest = new Map();
         const ordered = [...(stamps || [])].sort(
@@ -4521,9 +4683,9 @@
           cloudAnnouncement()
         ]);
         const reactionMap = reactionsByMessage(messageResult.stamps);
-        const messages = (messageResult.rows || []).map((row) => (
+        const messages = nestReplies((messageResult.rows || []).map((row) => (
           mapCloudMessage(row, canModerate, reactionMap[String(row.id)] || {})
-        ));
+        )));
         return {
           messages,
           reactionsReady: true,
@@ -4874,7 +5036,9 @@
           }
         }
         dom.messageCount.textContent = String(
-          Array.isArray(state.messages) ? state.messages.length : messages
+          Array.isArray(state.messages)
+            ? state.messages.reduce((sum, message) => sum + 1 + (message.replies ? message.replies.length : 0), 0)
+            : messages
         );
       }
 
@@ -4935,7 +5099,7 @@
 
       function createMessageElement(message) {
         const article = document.createElement('article');
-        article.className = `message-item${message.pinned ? ' is-pinned' : ''}`;
+        article.className = `message-item${message.pinned ? ' is-pinned' : ''}${message.isReply ? ' reply-item' : ''}`;
 
         const top = document.createElement('div');
         top.className = 'message-top';
@@ -5019,6 +5183,8 @@
         const reactions = message.reactions || {};
         for (const emoji of REACTION_EMOJIS) {
           const authors = Array.isArray(reactions[emoji]) ? reactions[emoji] : [];
+          const row = document.createElement('div');
+          row.className = 'stamp-row';
           const button = document.createElement('button');
           button.type = 'button';
           button.className = `stamp-btn${mine && authors.includes(mine) ? ' is-mine' : ''}`;
@@ -5030,12 +5196,111 @@
             button.append(count);
           }
           button.addEventListener('click', () => toggleReaction(message, emoji, Boolean(mine && authors.includes(mine))));
-          stamps.append(button);
+          row.append(button);
+          if (authors.length) row.append(createStampFaces(authors));
+          stamps.append(row);
         }
 
         top.append(avatar, author, actions);
-        article.append(top, content, stamps);
+        article.append(top);
+        if (message.isReply && message.replyToName) {
+          const target = document.createElement('span');
+          target.className = 'reply-target';
+          target.textContent = `回复 ${message.replyToName}`;
+          article.append(target);
+        }
+        article.append(content, stamps);
+
+        if (!message.isReply && !(state.user && state.user.banned)) {
+          const replyToggle = document.createElement('button');
+          replyToggle.type = 'button';
+          replyToggle.className = 'reply-toggle';
+          replyToggle.textContent = '回复';
+          replyToggle.addEventListener('click', () => openReplyBox(article, message, replyToggle));
+          article.append(replyToggle);
+        }
+
+        if (Array.isArray(message.replies) && message.replies.length) {
+          const replies = document.createElement('div');
+          replies.className = 'message-replies';
+          for (const reply of message.replies) {
+            replies.append(createMessageElement(reply));
+          }
+          article.append(replies);
+        }
         return article;
+      }
+
+      function createStampFaces(authors) {
+        const faces = document.createElement('span');
+        faces.className = 'stamp-faces';
+        const shown = authors.slice(0, 4);
+        for (const id of shown) {
+          const face = document.createElement('span');
+          face.className = 'stamp-face';
+          if (cloudOwnerIdMatches(id)) face.classList.add('owner-avatar');
+          face.textContent = firstChar(id);
+          face.title = id;
+          paintAvatar(face, id, cloudOwnerIdMatches(id));
+          faces.append(face);
+        }
+        if (authors.length > shown.length) {
+          const more = document.createElement('span');
+          more.className = 'stamp-more';
+          more.textContent = `+${authors.length - shown.length}`;
+          more.title = authors.slice(shown.length).join('、');
+          faces.append(more);
+        }
+        return faces;
+      }
+
+      function openReplyBox(article, message, toggle) {
+        if (!state.user) {
+          showToast('先取一个 ID，再回复朋友');
+          scrollToIdentity();
+          return;
+        }
+        const existing = article.querySelector(':scope > .reply-box');
+        document.querySelectorAll('.reply-box').forEach((box) => box.remove());
+        if (existing) return;
+
+        const box = document.createElement('form');
+        box.className = 'reply-box';
+        const input = document.createElement('textarea');
+        input.maxLength = 400;
+        input.placeholder = `回复 ${message.author ? message.author.id : '这条留言'}`;
+        input.setAttribute('aria-label', '回复内容');
+        const send = document.createElement('button');
+        send.type = 'submit';
+        send.className = 'community-btn';
+        send.textContent = '发送';
+        const cancel = document.createElement('button');
+        cancel.type = 'button';
+        cancel.className = 'reply-toggle';
+        cancel.textContent = '取消';
+        cancel.addEventListener('click', () => box.remove());
+        box.append(input, send, cancel);
+        box.addEventListener('submit', async (event) => {
+          event.preventDefault();
+          const text = input.value.trim();
+          if (!text) return;
+          const content = replyContent(message.id, text);
+          if (content.length > 500) {
+            showToast('回复太长了');
+            return;
+          }
+          send.disabled = true;
+          try {
+            await api('/api/messages', { method: 'POST', body: { content } });
+            showToast('回复已发送');
+            await loadMessages(true);
+          } catch (error) {
+            showToast(error.message);
+            send.disabled = false;
+          }
+        });
+        toggle.insertAdjacentElement('afterend', box);
+        input.focus();
       }
 
       async function toggleReaction(message, emoji, active) {
