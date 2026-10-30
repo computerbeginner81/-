@@ -2932,6 +2932,17 @@
       </div>
 
       <div class="admin-panel" id="adminPanelView" hidden>
+        <section class="admin-section">
+          <div class="admin-section-head">
+            <h3>作息时间</h3>
+          </div>
+          <p class="field-note">上下班、午休、薪资、工作日和背景音乐。保存后所有打开网页的人看到同一套时间。</p>
+          <div class="admin-save-row">
+            <span class="char-count">只有站长能改</span>
+            <button class="community-btn" id="openScheduleSettings" type="button">修改时间表</button>
+          </div>
+        </section>
+
         <div class="admin-stats">
           <div class="admin-stat"><span>留言 ID</span><b id="adminStatUsers">0</b></div>
           <div class="admin-stat"><span>公开留言</span><b id="adminStatMessages">0</b></div>
@@ -4026,6 +4037,7 @@
         dom.ringBar.style.strokeDasharray = String(RING_LENGTH);
         window.OffworkCountdown = {
           applyShared: applySharedConfig,
+          openSettings: openSettingsModal,
           registerSave(handler) {
             saveSharedRemote = handler;
           }
@@ -5567,6 +5579,15 @@
         });
         dom.saveAnnouncement.addEventListener('click', handleSaveAnnouncement);
         dom.ownerLogout.addEventListener('click', handleOwnerLogout);
+        const openScheduleSettings = document.getElementById('openScheduleSettings');
+        if (openScheduleSettings) {
+          openScheduleSettings.addEventListener('click', () => {
+            if (window.OffworkCountdown && typeof window.OffworkCountdown.openSettings === 'function') {
+              window.OffworkCountdown.openSettings();
+            }
+            closeAdmin();
+          });
+        }
 
         document.addEventListener('keydown', (event) => {
           if (event.key === 'Escape' && !dom.adminModal.hidden) closeAdmin();
